@@ -1,0 +1,49 @@
+graph TD
+    subgraph Client [Client Interface Layer]
+        CLI["CLI Commands: put, get, del, batch, dump, check, open"]
+        Serve["Serve Daemon (Streaming stdin / stdout ACK Protocol)"]
+    end
+
+    subgraph Concurrency [Concurrency & Invariants Layer]
+        Lock["Global Reentrant Lock (threading.RLock)"]
+        DiskFull["Disk-Full Guard (max_bytes ceiling check)"]
+    end
+
+    subgraph Memory [In-Memory State]
+        Index["Hash Index: Dict[bytes, bytes]"]
+        SeqNum["Monotonic Sequence Counter"]
+    end
+
+    subgraph WritePath [Write Path Ordering]
+        P1["1. Acquire Lock"] --> P2["2. Predict Size (max_bytes)"]
+        P2 --> P3["3. Binary Frame + CRC32 Calc"]
+        P3 --> P4["4. Append Record to WAL"]
+        P4 --> P5["5. file.flush() + os.fsync()"]
+        P5 --> P6["6. Update In-Memory Index"]
+        P6 --> P7["7. Release Lock"]
+        P7 --> P8["8. Return / Emit ACK to stdout"]
+    end
+
+    subgraph Storage [Single On-Disk File: data.db]
+        Header["64-Byte File Header (KVDB_WAL)"]
+        Records["Structured Records (Magic: 0xDEADBEEF, CRC32, Payload, Trailer: 0xBEEFDEAD)"]
+        Commits["Two-Phase Commit Markers (OP_BATCH_COMMIT)"]
+    end
+
+    subgraph Recovery [Crash Recovery: open(path)]
+        R1["1. Clean *.compact.*.tmp files"] --> R2["2. Validate 64-Byte File Header"]
+        R2 --> R3["3. Sequential 1MB Buffered Scan"]
+        R3 --> R4["4. Verify Framing & CRC32"]
+        R4 --> R5["5. Buffer Batch Records in pending_batches"]
+        R5 --> R6["6. On Commit Marker: Apply Batch Ops"]
+        R6 --> R7["7. On Corrupted/Torn/Uncommitted Tail: truncate()"]
+        R7 --> R8["8. Populate Index & Re-open Ready"]
+    end
+
+    CLI --> Lock
+    Serve --> Lock
+    Lock --> WritePath
+    WritePath --> Storage
+    Storage -. Startup Scan .-> Recovery
+    Recovery -. Restores .-> Index
+
