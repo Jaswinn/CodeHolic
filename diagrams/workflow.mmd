@@ -1,0 +1,48 @@
+flowchart TD
+    A([Start]) --> B[Launch Key-Value Database]
+    B --> C[Open Database File]
+    C --> D{Database Exists?}
+    D -->|No| E[Create Database File]
+    D -->|Yes| F[Validate File Header]
+    E --> G[Initialize Hash Index]
+    F --> H[Recovery Engine]
+    H --> I[Read and Validate Records]
+    I --> J[Rebuild In-Memory Index]
+    J --> G
+    G --> K[Database Ready]
+    K --> L[Receive Client Operation]
+
+    L --> M{Operation Type}
+
+    M -->|PUT| N[Validate Key and Value]
+    M -->|GET| O[Search Hash Index]
+    M -->|DELETE| P[Validate Key]
+    M -->|BATCH| Q[Validate Batch]
+
+    N --> R[Append Record to Storage Log]
+    R --> S[Update Hash Index]
+    S --> T[Return Result]
+
+    O --> U{Key Found?}
+    U -->|Yes| V[Return Value]
+    U -->|No| W[Return NOT FOUND]
+
+    P --> X[Append DELETE Record]
+    X --> Y[Remove Key from Index]
+    Y --> T
+
+    Q --> Z[Prepare Transaction]
+    Z --> AA[Write Batch Records]
+    AA --> AB[Write Commit Marker]
+    AB --> AC[Commit Transaction]
+    AC --> T
+
+    V --> L
+    W --> L
+    T --> L
+
+    L --> AD{Close Requested?}
+    AD -->|No| L
+    AD -->|Yes| AE[Flush and Close]
+    AE --> AF([End])
+
